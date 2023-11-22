@@ -1,0 +1,186 @@
+---
+title: "Vero + SARS random priming"
+author: "Julia Micheel"
+date: "2023-08-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Experiment: 20211209_701_MR, Vero cells infected with SARS-CoV-2
+
+Aim: Comparison of the sequencing output generated from Vero cell RNA (derived from African Green Monkey; AGM) using random primers of different lengths for reverse transcription (6mer, 12mer, 18mer, 24mer). For better comparability, all individual samples (technical triplicates per primer of the RT) were subsampled to 7 million reads. Otherwise sequencing depth could affect the outcome.
+
+The `vero_sars_7000000.RData` file contains all input data needed to run the code in this Markdown.
+
+
+```{r basics, message=FALSE, warning=FALSE}
+library(DT) #create datatable
+library(tidyverse)
+library(UpSetR) #upset plot
+
+data_filt <- agm_sars_genes_tpm %>% dplyr::filter(TPM >= 1)
+
+data_filt$sample <- gsub("_7000000_agm", "", data_filt$filename)
+data_filt$sample <- gsub("_7000000_sars", "", data_filt$sample)
+
+data_filt$sample <- gsub("no0..-0_tst_JM_029_", "", data_filt$sample)
+data_filt$sample <- gsub("_SARS_", "", data_filt$sample)
+
+###
+
+## subgroup least abundant bio types in column bio (stacked bar plot input)
+
+data_filt$bio<-ifelse(grepl("*pseudogene*",data_filt$gene_biotype), "pseudogene", data_filt$gene_biotype)
+
+data_filt$bio<-ifelse(grepl("misc_RNA", data_filt$bio), "other", data_filt$bio)
+data_filt$bio<-ifelse(grepl("lincRNA", data_filt$bio), "other", data_filt$bio)
+data_filt$bio<-ifelse(grepl("Mt", data_filt$bio), "mitochondrial RNAs", data_filt$bio)
+data_filt$bio<-ifelse(grepl("rRNA", data_filt$bio), "other", data_filt$bio)
+data_filt$bio<-ifelse(grepl("miRNA", data_filt$bio), "other", data_filt$bio)
+data_filt$bio<-ifelse(grepl("snoRNA", data_filt$bio), "other", data_filt$bio)
+data_filt$bio<-ifelse(grepl("snRNA", data_filt$bio), "other", data_filt$bio)
+data_filt$bio<-ifelse(grepl("sRNA", data_filt$bio), "other", data_filt$bio)
+data_filt$bio<-ifelse(grepl("ribozyme", data_filt$bio), "other", data_filt$bio)
+
+
+data_filt$sample <- factor(data_filt$sample, levels = c("6mer1", "6mer2", "6mer3","12mer1", "12mer2", "12mer3","18mer1", "18mer2", "18mer3","24mer1", "24mer2", "24mer3"))
+
+data_filt$bio <- factor(data_filt$bio, levels = c("protein_coding", "pseudogene", "mitochondrial RNAs", "other"))
+
+biotype_bar <- data_filt %>% 
+  dplyr::count(sample, bio, wt=TPM, name="TPM") %>%
+  ggplot(., aes(fill=bio, x=sample, y=TPM)) +
+  geom_bar(position=position_stack(reverse = TRUE), stat="identity")  + 
+  scale_fill_brewer(palette = "Paired", name = "biotype", labels = c("protein_coding", "pseudogene", "mitochondrial RNAs", "other")) + 
+  scale_x_discrete(expand=c(0,0)) + 
+  scale_y_continuous(labels= function(x) paste0(x*100/1000000, "%"), expand=c(0,0)) + 
+  labs(x="", y="TPM (%)")  + 
+  theme_classic() +
+  coord_flip()
+biotype_bar
+```
+
+```{r basics, message=FALSE, warning=FALSE}
+genecount_dist <- data_filt %>% 
+  group_by(sample, gene_id) %>% 
+  summarise(genes=n_distinct(gene_id))
+
+genecount_sum <- aggregate(genecount_dist$genes, by=list(Category=genecount_dist$sample), FUN=sum)
+genecount_sum$primer <- genecount_sum$Category
+genecount_sum$primer <- gsub(".{1}$", "", genecount_sum$primer)
+
+genecount_sum$primer <- factor(genecount_sum$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+total_genes <- genecount_sum %>%
+  ggplot(., aes(x = primer, y = x, fill = primer, color = primer, alpha = primer)) +
+  geom_boxplot(width=0.5, lwd=1) +
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("primer", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + 
+  scale_y_continuous(trans = "log10" ) +
+  labs(x="", y="Number of genes detected (TPM >= 1)") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust=0.7), legend.position = "none") +
+  guides(fill = "none")
+  
+total_genes
+```
+
+
+```{r basics, message=FALSE, warning=FALSE}
+biotype_filt <- data_filt %>% 
+  dplyr::count(sample, gene_biotype)
+
+biotype_filt <- biotype_filt %>%
+  dplyr::mutate(gene_biotype = ifelse(grepl("pseudo", biotype_filt$gene_biotype), "pseudogene", biotype_filt$gene_biotype)) %>% 
+  dplyr::group_by(sample, gene_biotype) %>%
+  dplyr::summarize(across(everything(), ~sum(.x))) %>%
+  dplyr::ungroup()
+
+biotype_filt$primer <- biotype_filt$sample
+biotype_filt$primer <- gsub(".{1}$","", biotype_filt$primer)
+
+biotype_filt$primer <- factor(biotype_filt$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+biotype_filt$gene_biotype <- factor(biotype_filt$gene_biotype, levels= c("protein_coding", "pseudogene", "snoRNA", "snRNA"))
+
+biotype_counts <- biotype_filt %>% 
+  dplyr::filter(gene_biotype %in% c("snoRNA", "snRNA", "pseudogene","protein_coding" )) %>%
+  ggplot(., aes(x = reorder(primer, primer), y = n, fill = primer,  alpha = primer, color = primer)) + 
+  geom_boxplot() + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) +facet_wrap(.~ case_when(gene_biotype == "pseudogene" ~ "pseudogene", gene_biotype == "snRNA" ~ "snRNA", gene_biotype == "snoRNA" ~ "snoRNA", gene_biotype == "protein_coding" ~ "protein coding"), scales = "free_y") +
+  labs(title="", x="", y="Number of genes (TPM >= 1)") + 
+  theme_classic() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7))
+biotype_counts
+```
+
+```{r basics, message=FALSE, warning=FALSE}
+length_bins <- mutate(data_filt, bin = cut(length, breaks=c(0, 200, 1000, 2500, 100000)))
+
+length_count <- length_bins %>% 
+  #dplyr::filter(organism == "agm") %>% 
+  dplyr::count(filename, bin) %>% 
+  pivot_wider(names_from = bin, values_from = n)
+names(length_count) <- c("filename", "0 - 200 bp", "200 - 1000 bp", "1000 - 2500 bp", "2500 - 100000 bp")
+
+length_count_lf <- length_count %>% pivot_longer(!filename, names_to = "bin", values_to = "transcripts")
+
+length_count_lf$sample <- gsub("_7000000_agm", "", length_count_lf$filename)
+length_count_lf$sample <- gsub("no0..-0_tst_JM_029_", "", length_count_lf$sample)
+length_count_lf$sample <- gsub("_SARS_", "", length_count_lf$sample)
+length_count_lf$sample <- gsub("_7000000_sars", "", length_count_lf$sample)
+
+length_count_lf <- length_count_lf %>% group_by(sample, bin) %>% summarise(transcripts = sum(transcripts))
+
+length_count_lf$primer <- gsub(".{1}$","", length_count_lf$sample)
+length_count_lf$primer <- factor(length_count_lf$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+length_count_lf$bin <- factor(length_count_lf$bin, levels= c("0 - 200 bp", "200 - 1000 bp", "1000 - 2500 bp", "2500 - 100000 bp"))
+
+length_plot <- length_count_lf %>% 
+  ggplot(., aes(x = primer, y = transcripts, fill=primer, color = primer, alpha = primer)) + 
+  geom_boxplot() + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + 
+  facet_wrap(.~ bin, scales = "free_y") + scale_y_continuous(trans = "log10" ) + 
+  labs(title="", x="", y="Number of transcripts (TPM >= 1)") + 
+  theme_classic() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7))
+length_plot
+```
+
+
+
+Upset plots: overlap of detected genes across samples (must be found in 2/3 replicates or 3/3 replicates to be counted)
+```{r upset, message=FALSE, warning=FALSE}
+upset_count <- data_filt %>% dplyr::filter(organism == "agm") %>% dplyr::count(gene_id, primer)
+
+upset_count <- upset_count %>%
+  pivot_wider(names_from = primer, values_from = n)
+
+################# min 2/3 replicates
+upset_count_2rep <- upset_count %>% replace(is.na(.),0)
+upset_count_2rep[upset_count_2rep == 1] <- 0
+upset_count_2rep[upset_count_2rep == 2] <- 1
+upset_count_2rep[upset_count_2rep == 3] <- 1
+
+upset_count_2rep <- as.data.frame(upset_count_2rep)
+
+upset23 <- upset(upset_count_2rep,
+      sets = c("24mer", "18mer", "12mer", "6mer"),
+      order.by = "freq",
+      keep.order = T,
+      sets.bar.color=c("#CCBB44","#AA3377","#228833","#4477AA"),
+      sets.x.label = "Number of genes detected",
+      mainbar.y.label = "Number of genes")
+upset23
+```

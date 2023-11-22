@@ -1,0 +1,544 @@
+---
+title: "random_primer_analysis_exp1"
+author: "Julia Micheel"
+date: "2023-05-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Experiment: exp1; 20211209_701_MR, human brain data
+
+Aim: Comparison of the sequencing output generated from human brain RNA using random primers of different lengths for reverse transcription (6mer, 12mer, 18mer, 24mer). For better comparability, all individual samples (technical triplicates per primer of the RT) were subsampled to 5 million reads. Otherwise sequencing depth could affect the outcome.
+
+`The experiment1_input.RData` file contains all input data needed to run the code in this Markdown.
+RSEM-generated input files:
+tst_JM_029_5000000_HBr_tpm, tst_JM_029_5000000_HBr_iso, tst_JM_029_6mer_HBr_tpm, tst_JM_029_12mer_HBr_tpm, tst_JM_029_18mer_HBr_tpm, tst_JM_029_24mer_HBr_tpm
+
+the `brain_all_genes` dataframe contains the list of protein-coding genes that are expressed in the brain according to the Human Brain Atlas. We retrieved the data on 11 May 2023.
+
+The `gen` and `trans` dataframes contain the gene and transcript info we retrieved from Ensembl as shown below.
+
+## Gene & Biotype analysis
+```{r basics, message=FALSE, warning=FALSE}
+## load libraries
+library(DT)
+library(tidyverse)
+library(AnnotationHub) #gene and transcript info from ensembldb via annotationhub
+library(ensembldb)
+library(UpSetR) #upset plot
+
+## tst_JM_029_5000000_HBr_tpm is used as input; it includes gene id, gene length and TPM values (RSEM output)
+HBr_wf <- tst_JM_029_5000000_HBr_tpm 
+
+## the column gene_id is "copied" into "genes"
+genes <-  HBr_wf$gene_id
+## from the gene ids the part after the dot is removed // cropping the gene ids
+genes1<-gsub("\\..*","",genes)
+
+## genes1 (the cropped version of the gene ids) is added to DFs (and called genes in there)
+HBr_wf$genes<-genes1
+
+## get gene and transcript info (data is saved in the .RData input file so this part of code doesn't need to be run)
+#human_ens <- query(AnnotationHub(), c("homo sapiens", "EnsDb"))
+#human_ens <- human_ens[["AH98047"]]
+#gen <- genes(human_ens, return.type = "data.frame")
+#trans <- transcripts(human_ens, return.type = "data.frame")
+
+##HBr_wf and the gene_IDs_hsa are merged by genes/ensembl_gene_id 
+df_HBr <- HBr_wf %>% full_join(., gen, by = c("genes" = "gene_id"))
+
+## create a sample column based on the filename
+df_HBr$sample <- gsub("_5000000_trim_clean.genes.results", "", df_HBr$filename)
+df_HBr$sample <- gsub("no0..-0_tst_JM_029_", "", df_HBr$sample)
+df_HBr$sample <- gsub("_HBr_", "", df_HBr$sample)
+
+##renaming all column names of the tables df_HBr
+names(df_HBr) <- c("filename", "gene_id_version", "length", "tpm", "primer", "genes", "gene_name", "biotype", "gene_start", "gene_end", "seq_name", "seq_strand", "seq_coord_system", "description", "gene_id_version2", "canonical_transcript", "external_gene_name", "entrez_id", "sample")
+
+##all pseudogene types are collected as "pseudogene" in column bio
+df_HBr$bio<-ifelse(grepl("*pseudogene*",df_HBr$biotype), "pseudogene", df_HBr$biotype)
+
+## subgroup least abundant bio types in column bio (stacked bar plot input)
+df_HBr$bio<-ifelse(grepl("IG", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("TR_C_gene", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("vault_RNA", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("misc_RNA", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("scaRNA", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("TEC", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("Mt", df_HBr$bio), "mitochondrial RNAs", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("rRNA", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("miRNA", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("artifact", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("sRNA", df_HBr$bio), "other", df_HBr$bio)
+df_HBr$bio<-ifelse(grepl("ribozyme", df_HBr$bio), "other", df_HBr$bio)
+
+## some genes don't have information in ensembl, so biotype, gc content etc are missing (NAs) --> converted to bio "other"
+df_HBr <- df_HBr %>% replace_na(list(bio="other"))
+
+df_HBr <- df_HBr %>% dplyr::filter(!str_detect(string = gene_id_version, pattern = "PAR_Y"))
+
+df_HBr <- df_HBr %>% 
+  drop_na("tpm")
+
+##TPM cutoff 1
+df_HBr_filt <- df_HBr %>% dplyr::filter(tpm >= 1)
+```
+
+
+Proportions of bio types detected with different random primers
+(=according to TPM values, independent from complexity/number of genes per bio type)
+```{r barplot_biotypes, message=FALSE, warning=FALSE}
+df_HBr_filt$sample <- factor(df_HBr_filt$sample, levels = c("6mer1", "6mer2", "6mer3","12mer1", "12mer2", "12mer3","18mer1", "18mer2", "18mer3","24mer1", "24mer2", "24mer3"))
+
+df_HBr_filt$bio <- factor(df_HBr_filt$bio, levels = c("protein_coding", "lncRNA", "pseudogene", "snRNA", "snoRNA", "scRNA", "mitochondrial RNAs", "other"))
+
+biotype_bar <- df_HBr_filt %>% 
+  dplyr::count(sample, bio, wt=tpm, name="tpm") %>%
+  ggplot(., aes(fill=bio, x=sample, y=tpm)) +
+  geom_bar(position=position_stack(reverse = TRUE), stat="identity")  + 
+  scale_fill_brewer(palette = "Paired", name = "biotype", labels = c("protein coding", "lncRNA", "pseudogene", "snRNA",    "snoRNA", "scRNA", "mitochondrial RNA", "other")) + 
+  scale_x_discrete(expand=c(0,0)) + 
+  scale_y_continuous(labels= function(x) paste0(x*100/1000000, "%"), expand=c(0,0)) + 
+  labs(x="", y="TPM (%)")  + 
+  theme_classic() +
+  coord_flip()
+biotype_bar
+```
+
+Number of genes per bio types detected with different random primers
+```{r table_genes_per_biotype, message=FALSE, warning=FALSE}
+##generate table from long format table %>% number of genes per bio type in each sample %>% convert to wide format
+biotype_table_HBr <- df_HBr_filt %>% 
+  dplyr::count(sample, bio) %>% 
+  pivot_wider(names_from = bio, values_from = n)
+
+datatable(biotype_table_HBr)
+```
+
+Total number of genes detected
+```{r gene_count, message=FALSE, warning=TRUE}
+genecount_dist <- df_HBr_filt %>% 
+  group_by(sample, gene_id_version) %>% 
+  summarise(genes=n_distinct(gene_id_version))
+
+genecount_sum <- aggregate(genecount_dist$genes, by=list(Category=genecount_dist$sample), FUN=sum)
+genecount_sum$primer <- genecount_sum$Category
+genecount_sum$primer <- gsub(".{1}$", "", genecount_sum$primer)
+
+genecount_sum$primer <- factor(genecount_sum$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+total_genes <- genecount_sum %>%
+  ggplot(., aes(x = primer, y = x, fill = primer, color = primer, alpha = primer)) +
+  geom_boxplot(width=0.5, lwd=1) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("primer", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + 
+  scale_y_continuous(trans = "log10" ) +
+  labs(x="", y="Number of genes detected (TPM >= 1)") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust=0.7), legend.position = "none") +
+  guides(fill = "none")
+  
+total_genes
+```
+
+Genes per biotype detected with different random primers
+```{r table_genes_per_biotype_boxplot, message=FALSE, warning=FALSE}
+biotype_HBr_lf <- df_HBr_filt %>% 
+  dplyr::count(sample, biotype)
+
+biotype_HBr_lf <- biotype_HBr_lf %>%
+  dplyr::mutate(biotype = ifelse(grepl("pseudo", biotype_HBr_lf$biotype), "pseudogene", biotype_HBr_lf$biotype)) %>% 
+  dplyr::group_by(sample, biotype) %>%
+  dplyr::summarize(across(everything(), ~sum(.x))) %>%
+  dplyr::ungroup()
+
+biotype_HBr_lf$primer <- biotype_HBr_lf$sample
+biotype_HBr_lf$primer <- gsub(".{1}$","", biotype_HBr_lf$primer)
+
+biotype_HBr_lf$primer <- factor(biotype_HBr_lf$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+biotype_HBr_lf$biotype <- factor(biotype_HBr_lf$biotype, levels= c("protein_coding", "lncRNA", "pseudogene", "snoRNA", "snRNA"))
+
+biotype_counts <- biotype_HBr_lf %>% 
+  dplyr::filter(biotype %in% c("snoRNA", "snRNA", "lncRNA", "pseudogene","protein_coding" )) %>%
+  ggplot(., aes(x = reorder(primer, primer), y = n, fill = primer,  alpha = primer, color = primer)) + 
+  geom_boxplot() + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) +facet_wrap(.~ case_when(biotype == "pseudogene" ~ "pseudogene", biotype == "lncRNA" ~ "lncRNA", biotype == "snRNA" ~ "snRNA", biotype == "snoRNA" ~ "snoRNA", biotype == "protein_coding" ~ "protein coding"), scales = "free_y") +
+  labs(title="", x="", y="Number of genes (TPM >= 1)") + 
+  theme_classic() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7))
+biotype_counts
+```
+
+Reliability of gene detection (Detection % across the replicates per TPM)
+```{r tpm_detection, message=FALSE, warning=FALSE}
+hb_data <- df_HBr_filt %>% 
+  as.tibble() 
+
+# transform tpm -> log10_tpm & cut into bins from log10_tpm = 0 to 5.5
+hb_data_1 <- hb_data %>% 
+  group_by(sample) %>% 
+  mutate(log_tpm = log10(tpm)) %>% 
+  mutate(bin = cut(log_tpm, include.lowest = T, breaks = c(0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5))) %>% 
+  mutate(sample2 = str_sub(sample, end = -2),
+         replicate = str_sub(sample, -1)) %>% 
+  ungroup() 
+
+# the 'count' column counts in how many replicates the genes were detected
+hb_data_2 <- hb_data_1 %>% 
+  group_by(genes, sample2) %>% 
+  summarise(count = n())
+
+# function to get the s.e.m.
+std <- function(x) sd(x)/sqrt(length(x))
+
+# add 'count' column to original df (hb_data_1)
+hb_data_3 <- hb_data_1 %>% 
+  left_join(.,hb_data_2, by = c("genes", "sample2"))  %>% 
+  distinct() %>% 
+  # calculate ave count per bin in each sample -> convert to %
+  dplyr::select(genes, sample2, bin, count) %>% 
+  mutate(percent = count/3*100) %>% 
+  group_by(sample2, bin) %>% 
+  summarise(ave_perc = mean(percent), sem = std(percent)) %>% 
+  mutate(clean_bin = str_sub(bin, start = 2, end = 6),
+         clean_bin = str_replace(clean_bin, ",", " - "),
+         clean_sample = sample2)
+
+hb_data_3$clean_sample <- factor(hb_data_3$clean_sample, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+tpm_detection <- hb_data_3 %>% 
+  ggplot(aes(x = clean_bin, y= ave_perc, group = clean_sample)) +
+  geom_line(aes(color = clean_sample), size = 1, alpha = 0.4) +
+  geom_point(aes(color = clean_sample)) +
+  scale_colour_manual( values = c("6mer" ="#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" = "#CCBB44")) +
+  geom_linerange(aes(ymin = ave_perc-sem, ymax = ave_perc+sem))+
+  labs(title="", x = "TPM, log10", y = "Gene detection (%)", color = "primer") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+tpm_detection
+```
+
+Number of Genes vs Number of Reads
+```{r genes_vs_reads, message=FALSE, warning=FALSE}
+hbr_read_gene <- rbind(tst_JM_029_6mer_HBr_tpm, tst_JM_029_12mer_HBr_tpm, tst_JM_029_18mer_HBr_tpm, tst_JM_029_24mer_HBr_tpm)
+
+### count number of genes per primer replicate per subsample
+hbr_read_gene <- hbr_read_gene %>% dplyr::filter(TPM >= 1)
+
+#add primer column based on filename
+hbr_read_gene$primer <- gsub("no0..-0_tst_JM_029_","", hbr_read_gene$filename)
+hbr_read_gene$primer <- gsub("\\_.*","", hbr_read_gene$primer)
+
+#add sample column based on primer column + filename
+hbr_read_gene$sample <- paste0(hbr_read_gene$primer, gsub("^(?:[^_]+_){6}([^_]+).*", "\\1", hbr_read_gene$filename))
+
+hbr_read_gene_count <- hbr_read_gene %>% 
+  dplyr::count(sample, subsample) %>% 
+  pivot_wider(names_from = subsample, values_from = n)
+
+hbr_read_gene_count_lf <- hbr_read_gene_count %>% 
+  pivot_longer(!sample, names_to = "reads", values_to = "genes")
+hbr_read_gene_count_lf$reads <- factor(hbr_read_gene_count_lf$reads, levels= c("156250", "312500", "625000", "1250000", "2500000", "5e+06", "1e+07"))
+
+hbr_read_gene_count_lf$primer <- gsub(".{1}$","", hbr_read_gene_count_lf$sample)
+hbr_read_gene_count_lf$primer <- factor(hbr_read_gene_count_lf$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+# function to get the s.e.m.
+std <- function(x) sd(x)/sqrt(length(x))
+
+mean_genes <- hbr_read_gene_count_lf %>% 
+  group_by(primer, reads) %>% 
+  summarise(ave = mean(genes), sem = std(genes))
+
+rvsg_labels <- c("156,250", "312,500", "625,000", "1,250,000", "2,500,000", "5,000,000", "10,000,000")
+
+reads_vs_genes <- mean_genes %>% 
+  ggplot(aes(x = reads, y= ave , group = primer)) +
+  geom_line(aes(color = primer), alpha = 0.5, size = 1) +
+  geom_point(aes(color = primer), alpha = 1) +
+  scale_colour_manual( values = c("6mer" ="#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" = "#CCBB44")) +
+  geom_linerange(aes(ymin = ave-sem, ymax = ave+sem), alpha=0.5)+
+  theme_classic() +
+  labs(x = "Number of reads", y = "Number of genes detected (TPM >= 1)", color = "primer") +
+  scale_x_discrete(labels= rvsg_labels) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+reads_vs_genes
+```
+
+Upset plots: subsets of detected genes across samples (must be found in 2/3 replicates or 3/3 replicates to be counted)
+```{r upset, message=FALSE, warning=FALSE}
+upset_count <- df_HBr_filt %>% dplyr::count(genes, primer)
+
+upset_count <- upset_count %>%
+  pivot_wider(names_from = primer, values_from = n)
+
+################# min 2/3 replicates
+upset_count_2rep <- upset_count %>% replace(is.na(.),0)
+upset_count_2rep[upset_count_2rep == 1] <- 0
+upset_count_2rep[upset_count_2rep == 2] <- 1
+upset_count_2rep[upset_count_2rep == 3] <- 1
+
+upset_count_2rep <- as.data.frame(upset_count_2rep)
+
+upset23 <- upset(upset_count_2rep,
+      sets = c("24mer", "18mer", "12mer", "6mer"),
+      order.by = "freq",
+      keep.order = T,
+      sets.bar.color=c("#CCBB44","#AA3377","#228833","#4477AA"),
+      sets.x.label = "Number of genes detected",
+      mainbar.y.label = "Number of genes")
+upset23
+```
+
+## Transcript analysis
+
+quantification of total transcripts (= isoforms) per primer 
+```{r gene_length, message=FALSE, warning=FALSE}
+isocount <- tst_JM_029_5000000_HBr_iso %>% 
+  dplyr::filter(TPM >= 1) %>%
+  dplyr::filter(!str_detect(string = transcript_id, pattern = "PAR_Y")) %>% 
+  group_by(filename, transcript_id) %>% 
+  summarise(isoforms=n_distinct(transcript_id))
+
+isocount_sum <- aggregate(isocount$isoforms, by=list(Category=isocount$filename), FUN=sum)
+
+isocount_sum$primer <- c("6mer", "6mer", "6mer", "12mer", "12mer", "12mer","18mer", "18mer", "18mer","24mer", "24mer", "24mer")
+isocount_sum$primer <- factor(isocount_sum$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+total_isoforms <- isocount_sum %>%
+ggplot(., aes(x = reorder(primer, primer), y = x, fill = primer, color = primer, alpha = primer)) +
+  geom_boxplot(width=0.5, lwd=1, fatten=2) +
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("primer", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) +
+  scale_y_continuous(trans = "log10" ) +
+  labs(x="", y="Number of isoforms detected (TPM >= 1)") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust=0.7), legend.position = "none") +
+  guides(fill = "none")
+total_isoforms
+```
+
+Transcripts per GC content
+```{r table_genes_per_gc_boxplot, message=FALSE, warning=FALSE, eval=FALSE}
+hbr_trans <- inner_join(trans, tst_JM_029_5000000_HBr_iso, by = c("tx_id_version" = "transcript_id"))
+hbr_trans <- hbr_trans %>% dplyr::filter(!str_detect(string = tx_id_version, pattern = "PAR_Y"))
+hbr_trans_filt <- hbr_trans %>% dplyr::filter(TPM >= 1)
+
+## generate table from long format table %>% number of genes per GC content in each sample %>% convert to wide format
+gc_table_HBr <- hbr_trans_filt %>% 
+  dplyr::count(filename, gc_content) %>% 
+  pivot_wider(names_from = gc_content, values_from = n)
+
+## bins for gene count
+gc_bins <- mutate(hbr_trans_filt, gc_bin = cut(gc_content, breaks=c(20, 40, 50, 60, 80)))
+gc_bin_count <- gc_bins %>% 
+  dplyr::count(filename, gc_bin) %>% 
+  pivot_wider(names_from = gc_bin, values_from = n)
+
+## generate long format table
+gc_bin_count_lf <- gc_bin_count %>% 
+  pivot_longer(!filename, names_to = "GC_content", values_to = "genes")
+
+gc_bin_count_lf$sample <- gsub("_5000000_trim_clean.isoforms.results", "", gc_bin_count_lf$filename)
+gc_bin_count_lf$sample <- gsub("no0..-0_tst_JM_029_", "", gc_bin_count_lf$sample)
+gc_bin_count_lf$sample <- gsub("_HBr_", "", gc_bin_count_lf$sample)
+
+gc_bin_count_lf$primer <- gc_bin_count_lf$sample
+gc_bin_count_lf$primer <- gsub(".{1}$","", gc_bin_count_lf$primer)
+
+gc_bin_count_lf$primer <- factor(gc_bin_count_lf$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+gc_bins <- gc_bin_count_lf %>%
+  ggplot(., aes(x = reorder(primer, primer), y = genes, fill = primer,  alpha = primer, color = primer)) + 
+  geom_boxplot() + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + 
+  facet_wrap(.~ case_when(GC_content == "(20,40]" ~ "20 - 40 %", GC_content == "(40,50]" ~ "40 - 50 %", GC_content == "(50,60]" ~ "50 - 60 %", GC_content == "(60,80]" ~ "60 - 80 %"), scales = "free_y") + 
+  scale_y_continuous(trans = "log10" ) +
+  labs(title="", x="", y="Number of transcripts (TPM >= 1)") + 
+  theme_classic() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.8))
+gc_bins
+```
+
+Box plots comparing the transcript lengths detected with different primers
+```{r gene_length, message=FALSE, warning=FALSE, eval=FALSE}
+hbr_length_bins <- mutate(hbr_trans_filt, bin = cut(length, breaks=c(0, 200, 1000, 2500, 100000)))
+
+hbr_length_count <- hbr_length_bins %>% 
+  dplyr::count(filename, bin) %>% 
+  pivot_wider(names_from = bin, values_from = n)
+names(hbr_length_count) <- c("filename", "0 - 200 bp", "200 - 1000 bp", "1000 - 2500 bp", "2500 - 100000 bp")
+
+hbr_length_count_lf <- hbr_length_count %>% pivot_longer(!filename, names_to = "bin", values_to = "transcripts")
+
+hbr_length_count_lf$sample <- gsub("_5000000_trim_clean.isoforms.results", "", hbr_length_count_lf$filename)
+hbr_length_count_lf$sample <- gsub("no0..-0_tst_JM_029_", "", hbr_length_count_lf$sample)
+hbr_length_count_lf$sample <- gsub("_HBr_", "", hbr_length_count_lf$sample)
+
+hbr_length_count_lf$primer <- gsub(".{1}$","", hbr_length_count_lf$sample)
+hbr_length_count_lf$primer <- factor(hbr_length_count_lf$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+hbr_length_count_lf$bin_f <- factor(hbr_length_count_lf$bin, levels= c("0 - 200 bp", "200 - 1000 bp", "1000 - 2500 bp", "2500 - 100000 bp"))
+
+length_bins <- hbr_length_count_lf %>% 
+  ggplot(., aes(x = primer, y = transcripts, fill=primer, color = primer, alpha = primer)) + 
+  geom_boxplot() + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + 
+  facet_wrap(.~ bin_f, scales = "free_y") + scale_y_continuous(trans = "log10" ) + 
+  labs(title="", x="", y="Number of transcripts (TPM >= 1)") + 
+  theme_classic() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7))
+length_bins
+```
+Overlap between protein-coding genes detected in our libraries and protein-coding genes detected in brain tissue according to the Human Protein Atlas (as a sanity check to see if the genes we detected are in accordance with literature reports)
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
+# The data frame `brain_all_genes` contains all protein-coding genes detected in brain from the Human Protein Atlas (downloaded on 11 May 2023)
+
+# get all the detected protein coding genes per replicate
+genes_18mer1 <- df_HBr %>%
+  dplyr::filter(sample == "18mer1") %>%
+  dplyr::filter(tpm >= 1 & biotype == "protein_coding")
+
+# intersect the detected genes of the replicate with genes that are detected in the brain
+genes_18mer1_brain <- length(intersect(genes_18mer1$gene_name, brain_all_genes$Gene))
+
+genes_18mer2 <- df_HBr %>%
+  dplyr::filter(sample == "18mer2") %>%
+  dplyr::filter(tpm >= 1 & biotype == "protein_coding")
+genes_18mer2_brain <- length(intersect(genes_18mer2$gene_name, brain_all_genes$Gene))
+
+genes_18mer3 <- df_HBr %>%
+  dplyr::filter(sample == "18mer3") %>%
+  dplyr::filter(tpm >= 1 & biotype == "protein_coding")
+genes_18mer3_brain <- length(intersect(genes_18mer3$gene_name, brain_all_genes$Gene))
+
+# make data frame and plot
+b <- data.frame(primer = c("18mer rep. 1", "18mer rep. 2", "18mer rep. 3"), brain = c(genes_18mer1_brain / nrow(genes_18mer1), genes_18mer2_brain / nrow(genes_18mer2), genes_18mer3_brain / nrow(genes_18mer3))) %>%
+  dplyr::mutate(other = 1 - brain) %>%
+  dplyr::mutate(brain = brain * 100) %>%
+  dplyr::mutate(other = other * 100) %>%
+  pivot_longer(!primer, names_to = "tissue", values_to = "percent")
+
+b$tissue <- factor(b$tissue, levels = c("other", "brain"))
+
+b_plot <- b %>% 
+  ggplot(., aes(x = primer, y = percent, fill = tissue)) +
+  geom_col(width = 0.5) +
+  scale_y_continuous(expand=c(0,0)) +
+  scale_fill_manual("tissue", values = c("brain" = "#009988", "other" = "#EE7733")) +
+  ylab(label = "% protein-coding genes") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key=element_rect(fill="white")) +
+  coord_flip()
+b_plot
+```
+
+
+
+Identification of the uniquely detected genes per primer; identification of the overlap between protein-coding genes uniquely detected with one of the primer lengths in our libraries and protein-coding genes detected in brain tissue according to the Human Protein Atlas (as a sanity check to see if the genes we detected are in accordance with literature reports)
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
+
+upset_count_2rep$sum <- upset_count_2rep$"6mer" + upset_count_2rep$"12mer" + upset_count_2rep$"18mer" + upset_count_2rep$"24mer"
+
+unique <- upset_count_2rep %>%  dplyr::filter(sum == 1)
+
+unique_6 <- unique %>% dplyr::filter(`6mer` == 1) %>% dplyr::select(genes)
+unique_12 <- unique %>% dplyr::filter(`12mer` == 1) %>% dplyr::select(genes)
+unique_18 <- unique %>% dplyr::filter(`18mer` == 1) %>% dplyr::select(genes)
+unique_24 <- unique %>% dplyr::filter(`24mer` == 1) %>% dplyr::select(genes)
+
+unique_6mer <- left_join(unique_6, gen, c("genes" = "gene_id"))
+unique_12mer <- left_join(unique_12, gen, c("genes" = "gene_id"))
+unique_18mer <- left_join(unique_18, gen, c("genes" = "gene_id"))
+unique_24mer <- left_join(unique_24, gen, c("genes" = "gene_id"))
+
+pc_u6 <- unique_6mer %>% dplyr::filter(gene_biotype == "protein_coding")
+pc_u6_brain <- length(intersect(pc_u6$genes, brain_all_genes$Ensembl))
+pc_u12 <- unique_12mer %>% dplyr::filter(gene_biotype == "protein_coding")
+pc_u12_brain <- length(intersect(pc_u12$genes, brain_all_genes$Ensembl))
+pc_u18 <- unique_18mer %>% dplyr::filter(gene_biotype == "protein_coding")
+pc_u18_brain <- length(intersect(pc_u18$genes, brain_all_genes$Ensembl))
+pc_u24 <- unique_24mer %>% dplyr::filter(gene_biotype == "protein_coding")
+pc_u24_brain <- length(intersect(pc_u24$genes, brain_all_genes$Ensembl))
+
+
+# create data frame and plot
+w <- data.frame(primer = c("6mer", "12mer", "18mer", "24mer"), brain = c(pc_u6_brain, pc_u12_brain, pc_u18_brain, pc_u24_brain), other = c(nrow(pc_u6)-pc_u6_brain, nrow(pc_u12)-pc_u12_brain, nrow(pc_u18)-pc_u18_brain, nrow(pc_u24)-pc_u24_brain)) %>%
+  pivot_longer(!primer, names_to = "tissue", values_to = "genes")
+
+w$tissue <- factor(w$tissue, levels = c("other", "brain"))
+w$primer <- factor(w$primer, levels = c("6mer", "12mer", "18mer", "24mer"))
+
+w_plot <- w %>% 
+  ggplot(., aes(x = reorder(primer, primer), y = genes, fill = tissue)) +
+  geom_col(width = 0.5) +
+  scale_y_continuous(expand=c(0,0)) +
+  scale_fill_manual("tissue", values = c("brain" = "#009988", "other" = "#EE7733")) +
+  ylab(label = "Number of protein-coding genes detected (TPM >= 1)") +
+  xlab(label = "") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        legend.key=element_rect(fill="white")) +
+  coord_flip()
+w_plot
+```
+Quantification of the detected genes per FPKM per sample
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
+##FPKM cutoff 1
+df_HBr_ffilt <- tst_JM_029_5000000_HBr_fpkm %>% dplyr::filter(FPKM >=1)
+df_HBr_ffilt$primer <- factor(df_HBr_ffilt$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+hbr_fpkm_bins <- mutate(df_HBr_ffilt, bin = cut(FPKM, breaks=c(0, 20, 50, 1000000)))
+
+hbr_fpkm_count <- hbr_fpkm_bins %>% 
+  count(filename, bin) %>% 
+  pivot_wider(names_from = bin, values_from = n)
+names(hbr_fpkm_count) <- c("filename", "FPKM 1 - 20", "FPKM 20 - 50", "FPKM > 50")
+
+hbr_fpkm_count_lf <- hbr_fpkm_count %>% 
+  pivot_longer(!filename, names_to = "bin", values_to = "genes")
+
+hbr_fpkm_count_lf$sample <- gsub("_5000000_trim_clean", "", hbr_fpkm_count_lf$filename)
+hbr_fpkm_count_lf$sample <- gsub("no0..-0_tst_JM_029_", "", hbr_fpkm_count_lf$sample) 	
+hbr_fpkm_count_lf$sample <- gsub("_HBr_", "", hbr_fpkm_count_lf$sample)
+
+hbr_fpkm_count_lf$primer <- gsub(".{1}$","", hbr_fpkm_count_lf$sample)
+hbr_fpkm_count_lf$primer <- factor(hbr_fpkm_count_lf$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
+
+hbr_fpkm_count_lf$bin_f <- factor(hbr_fpkm_count_lf$bin, levels= c("FPKM 1 - 20", "FPKM 20 - 50", "FPKM > 50"))
+
+fpkm_exp1 <- hbr_fpkm_count_lf %>% 
+  ggplot(., aes(x = primer, y = genes, fill=primer, color = primer, alpha = primer)) + 
+  geom_boxplot(width=0.5, lwd=1) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
+  scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + facet_wrap(.~ bin_f, scales = "free_y") +
+  scale_y_continuous(trans = "log10" ) + 
+  labs(title="", x="", y="Number of genes (FPKM >= 1)") +
+  theme_classic() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7))
+fpkm_exp1
+```
+
