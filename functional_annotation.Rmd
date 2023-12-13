@@ -1,0 +1,95 @@
+---
+title: "GO_categories"
+author: "Julia Micheel"
+date: "2023-11-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Functional annotation analysis of the uniquely detected genes
+
+Uniquely detected genes per primer per experiment were analyzed for functional enrichment using the DAVID functional annotation tool (DAVID Version 2021, The DAVID Knowledgebase (v2023q3). ENSEMBL gene IDs were used as input and Homo sapiens as background. All genes that were mapped by DAVID were analyzed for functional enrichment (Count threshold: 2, EASE threshold: 0.1).
+The DAVID output files are available in "unique_genes_functional_annotation.rdata".
+These data frames include the enriched pathways and information about all the genes that are included within the pathways.
+With the code below, we filtered for significant pathways (Benjamini <= 0.05) and created a list of all the genes found in these pathways. As one gene can be present in multiple pathways we then created new lists of genes where each gene is only mentioned once.
+
+```{r}
+# filter for significant pathways
+sig6mer1 <- X6mer_exp1_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+# extract genes from the significant pathways // list of genes found in significant pathways = b_6mer1
+sig6mer1a <- sig6mer1$Genes
+split_ids_6mer1 <- strsplit(sig6mer1a, ", ")
+gene_id_list_6mer1 <- unlist(split_ids_6mer1)
+b_6mer1 <- unique(gene_id_list_6mer1)
+
+
+
+## same procedure for the other primers of experiment 1 and 2
+
+sig12mer1 <- X12mer_exp1_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+sig12mer1a <- sig12mer1$Genes
+split_ids_12mer1 <- strsplit(sig12mer1a, ", ")
+gene_id_list_12mer1 <- unlist(split_ids_12mer1)
+b_12mer1 <- unique(gene_id_list_12mer1)
+
+
+sig18mer1 <- X18mer_exp1_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+sig18mer1a <- sig18mer1$Genes
+split_ids_18mer1 <- strsplit(sig18mer1a, ", ")
+gene_id_list_18mer1 <- unlist(split_ids_18mer1)
+b_18mer1 <- unique(gene_id_list_18mer1)
+
+
+sig24mer1 <- X24mer_exp1_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+sig24mer1a <- sig24mer1$Genes
+split_ids_24mer1 <- strsplit(sig24mer1a, ", ")
+gene_id_list_24mer1 <- unlist(split_ids_24mer1)
+b_24mer1 <- unique(gene_id_list_24mer1)
+
+
+sig6mer2 <- X6mer_exp2_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+sig6mer2a <- sig6mer2$Genes
+split_ids_6mer2 <- strsplit(sig6mer2a, ", ")
+gene_id_list_6mer2 <- unlist(split_ids_6mer2)
+b_6mer2 <- unique(gene_id_list_6mer2)
+
+
+sig12mer2 <- X12mer_exp2_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+sig12mer2a <- sig12mer2$Genes
+split_ids_12mer2 <- strsplit(sig12mer2a, ", ")
+gene_id_list_12mer2 <- unlist(split_ids_12mer2)
+b_12mer2 <- unique(gene_id_list_12mer2)
+
+
+sig18mer2 <- X18mer_exp2_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+sig18mer2a <- sig18mer2$Genes
+split_ids_18mer2 <- strsplit(sig18mer2a, ", ")
+gene_id_list_18mer2 <- unlist(split_ids_18mer2)
+b_18mer2 <- unique(gene_id_list_18mer2)
+
+
+sig24mer2 <- X24mer_exp2_unique_genes %>%  
+  dplyr::filter(Benjamini <= 0.05)
+
+sig24mer2a <- sig24mer2$Genes
+split_ids_24mer2 <- strsplit(sig24mer2a, ", ")
+gene_id_list_24mer2 <- unlist(split_ids_24mer2)
+b_24mer2 <- unique(gene_id_list_24mer2)
+```
