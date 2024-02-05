@@ -21,6 +21,9 @@ library(bioanalyzeR)
 library(XML)
 library(ggpubr)
 library(ggh4x)
+library(rstatix)
+library(car)
+library(effsize)
 ```
 
 
@@ -136,6 +139,7 @@ dat20ng$length_bins <- factor(dat20ng$length_bins, levels=c("75bp-200bp", "200bp
 
 ```
 Box plots of the mean FU (scaled) per technical replicate per fragment length bin
+
 ```{r}
 primers <- c("6mer", "18mer", "mix")
 
@@ -200,3 +204,112 @@ ng20_box <- ng20_bin_y_scaled %>%
   scale_x_discrete(labels = primers)
 ng20_box
 ```
+
+
+```{r}
+ng5_df <- ng5_bin_y_scaled %>% pivot_wider(values_from = bin_sum, names_from = length_bins, id_cols = replicate)
+ng20_df <- ng20_bin_y_scaled %>% pivot_wider(values_from = bin_sum, names_from = length_bins, id_cols = replicate)
+ng5_df$primer <-  as.factor(str_remove(ng5_df$replicate, "\\d+$"))
+ng20_df$primer <-  as.factor(str_remove(ng20_df$replicate, "\\d+$"))
+colnames(ng5_df)[2:4] <- c("x75bp-200bp", "x200bp-500bp", "x500bp-1000bp")
+colnames(ng20_df)[2:4] <- c("x75bp-200bp", "x200bp-500bp", "x500bp-1000bp")
+ng5_df <- ng5_df %>% arrange(primer)
+ng20_df <- ng20_df %>% arrange(primer)
+
+t_results <- c()
+for (i in colnames(ng5_df)[c(3, 4)]){
+formula <- reformulate("primer", response = i)
+pwc <- ng5_df %>% pairwise_t_test(formula, pool.sd = TRUE, p.adjust.method = "BH", paired = FALSE, detailed = TRUE)
+t_results <- rbind(t_results, pwc)
+}
+
+t_results$Shapiro_Wilk1 <- c(shapiro.test(x =ng5_df[["x200bp-500bp"]][1:3])$p.value, shapiro.test(x =ng5_df[["x200bp-500bp"]][1:3])$p.value, shapiro.test(x =ng5_df[["x200bp-500bp"]][4:6])$p.value, shapiro.test(x =ng5_df[["x500bp-1000bp"]][1:3])$p.value, shapiro.test(x =ng5_df[["x500bp-1000bp"]][1:3])$p.value, shapiro.test(x =ng5_df[["x500bp-1000bp"]][4:6])$p.value)
+
+t_results$Shapiro_Wilk2 <- c(shapiro.test(x =ng5_df[["x200bp-500bp"]][4:6])$p.value, shapiro.test(x =ng5_df[["x200bp-500bp"]][7:9])$p.value, shapiro.test(x =ng5_df[["x200bp-500bp"]][7:9])$p.value, shapiro.test(x =ng5_df[["x500bp-1000bp"]][4:6])$p.value, shapiro.test(x =ng5_df[["x500bp-1000bp"]][7:9])$p.value, shapiro.test(x =ng5_df[["x500bp-1000bp"]][7:9])$p.value)
+
+f1 <- cohen.d(ng5_df[["x200bp-500bp"]][1:3], ng5_df[["x200bp-500bp"]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f1 <- paste0(round(f1$estimate, digits = 3), " ", "(", f1$magnitude, ")")
+f2 <- cohen.d(ng5_df[["x200bp-500bp"]][1:3], ng5_df[["x200bp-500bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f2 <- paste0(round(f2$estimate, digits = 3), " ", "(", f2$magnitude, ")")
+f3 <- cohen.d(ng5_df[["x200bp-500bp"]][4:6], ng5_df[["x200bp-500bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f3 <- paste0(round(f3$estimate, digits = 3), " ", "(", f3$magnitude, ")")
+f4 <- cohen.d(ng5_df[["x500bp-1000bp"]][1:3], ng5_df[["x500bp-1000bp"]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f4 <- paste0(round(f4$estimate, digits = 3), " ", "(", f4$magnitude, ")")
+f5 <- cohen.d(ng5_df[["x500bp-1000bp"]][1:3], ng5_df[["x500bp-1000bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f5 <- paste0(round(f5$estimate, digits = 3), " ", "(", f5$magnitude, ")")
+f6 <- cohen.d(ng5_df[["x500bp-1000bp"]][4:6], ng5_df[["x500bp-1000bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f6 <- paste0(round(f6$estimate, digits = 3), " ", "(", f6$magnitude, ")")
+
+t_results$effect_size <- c(f1, f2, f3, f4, f5, f6)
+t_results$Levenes_Test <- round(c(leveneTest(`x200bp-500bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_18mer", "5ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x200bp-500bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_18mer", "5ng_mix"), ])$`Pr(>F)`[1], leveneTest(`x200bp-500bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_mix", "5ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x500bp-1000bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_18mer", "5ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x500bp-1000bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_18mer", "5ng_mix"), ])$`Pr(>F)`[1], leveneTest(`x500bp-1000bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_mix", "5ng_6mer"), ])$`Pr(>F)`[1]), digits = 3)
+ng5 <- t_results %>% dplyr::select(group1, group2, .y., Shapiro_Wilk1, Shapiro_Wilk2, Levenes_Test, method, p.adj, p.adj.signif, effect_size) %>% dplyr::rename(feature = .y.) %>% dplyr::rename(Hedges_g_effect_size = effect_size) 
+
+ng5_181 <- ng5_df %>% pairwise_wilcox_test(`x75bp-200bp` ~ primer, p.adjust.method = "BH", paired = FALSE, detailed = TRUE) 
+
+ng5_182 <- ng5_df %>% dplyr::filter(primer != "5ng_18mer") %>% pairwise_t_test(`x75bp-200bp` ~ primer, pool.sd = TRUE, p.adjust.method = "BH", paired = FALSE, detailed = TRUE) 
+
+ng5_18 <- ng5_181 %>% dplyr::mutate(p.adj = if_else(group1 == "5ng_6mer" & group2 == "5ng_mix", ng5_182$p.adj, p.adj)) %>% dplyr::select(-c(estimate, statistic, conf.low, conf.high, n1, n2, p, alternative))
+
+ng5_18$Levenes_Test <- round(c(leveneTest(`x75bp-200bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_18mer", "5ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x75bp-200bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_18mer", "5ng_mix"), ])$`Pr(>F)`[1], leveneTest(`x75bp-200bp` ~ primer, data = ng5_df[ng5_df$primer %in% c("5ng_mix", "5ng_6mer"), ])$`Pr(>F)`[1]), digits = 3)
+
+ng5_18$Shapiro_Wilk1 <- c(shapiro.test(x =ng5_df[["x75bp-200bp"]][1:3])$p.value, shapiro.test(x =ng5_df[["x75bp-200bp"]][1:3])$p.value, shapiro.test(x =ng5_df[["x75bp-200bp"]][4:6])$p.value)
+
+ng5_18$Shapiro_Wilk2 <- c(shapiro.test(x =ng5_df[["x75bp-200bp"]][4:6])$p.value, shapiro.test(x =ng5_df[["x75bp-200bp"]][7:9])$p.value, shapiro.test(x =ng5_df[["x75bp-200bp"]][7:9])$p.value)
+
+f1 <- cohen.d(ng5_df[["x75bp-200bp"]][1:3], ng5_df[["x75bp-200bp"]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f1 <- paste0(round(f1$estimate, digits = 3), " ", "(", f1$magnitude, ")")
+f2 <- cohen.d(ng5_df[["x75bp-200bp"]][1:3], ng5_df[["x75bp-200bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f2 <- paste0(round(f2$estimate, digits = 3), " ", "(", f2$magnitude, ")")
+f3 <- cohen.d(ng5_df[["x75bp-200bp"]][4:6], ng5_df[["x75bp-200bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f3 <- paste0(round(f3$estimate, digits = 3), " ", "(", f3$magnitude, ")")
+ng5_18$effect_size <- c(f1, f2, f3)
+ng5_18 <- ng5_18 %>% dplyr::rename(feature = .y.) %>% dplyr::rename(Hedges_g_effect_size = effect_size) 
+
+ng5_stats <- rbind(ng5_18, ng5) %>% dplyr::select(group1, group2, feature, Shapiro_Wilk1, Shapiro_Wilk2, Levenes_Test, method, p.adj, p.adj.signif, Hedges_g_effect_size)
+ng5_stats$method <- ifelse(ng5_stats$Shapiro_Wilk1 < 0.05 | ng5_stats$Shapiro_Wilk2 < 0.05, "Mann–Whitney U test", "Student's t-test") 
+###
+
+t_results <- c()
+for (i in colnames(ng20_df)[c(2, 3, 4)]){
+formula <- reformulate("primer", response = i)
+pwc <- ng20_df %>% pairwise_t_test(formula, pool.sd = TRUE, p.adjust.method = "BH", paired = FALSE, detailed = TRUE)
+t_results <- rbind(t_results, pwc)
+}
+
+t_results$Shapiro_Wilk1 <- c(shapiro.test(x =ng20_df[["x75bp-200bp"]][1:3])$p.value, shapiro.test(x =ng20_df[["x75bp-200bp"]][1:3])$p.value, shapiro.test(x =ng20_df[["x75bp-200bp"]][4:6])$p.value, shapiro.test(x =ng20_df[["x200bp-500bp"]][1:3])$p.value, shapiro.test(x =ng20_df[["x200bp-500bp"]][1:3])$p.value, shapiro.test(x =ng20_df[["x200bp-500bp"]][4:6])$p.value, shapiro.test(x =ng20_df[["x500bp-1000bp"]][1:3])$p.value, shapiro.test(x =ng20_df[["x500bp-1000bp"]][1:3])$p.value, shapiro.test(x =ng20_df[["x500bp-1000bp"]][4:6])$p.value)
+
+t_results$Shapiro_Wilk2 <- c(shapiro.test(x =ng20_df[["x75bp-200bp"]][4:6])$p.value, shapiro.test(x =ng20_df[["x75bp-200bp"]][7:9])$p.value, shapiro.test(x =ng20_df[["x75bp-200bp"]][7:9])$p.value, shapiro.test(x =ng20_df[["x200bp-500bp"]][4:6])$p.value, shapiro.test(x =ng20_df[["x200bp-500bp"]][7:9])$p.value, shapiro.test(x =ng20_df[["x200bp-500bp"]][7:9])$p.value, shapiro.test(x =ng20_df[["x500bp-1000bp"]][4:6])$p.value, shapiro.test(x =ng20_df[["x500bp-1000bp"]][7:9])$p.value, shapiro.test(x =ng20_df[["x500bp-1000bp"]][7:9])$p.value)
+
+
+f1 <- cohen.d(ng20_df[["x75bp-200bp"]][1:3], ng20_df[["x75bp-200bp"]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f1 <- paste0(round(f1$estimate, digits = 3), " ", "(", f1$magnitude, ")")
+f2 <- cohen.d(ng20_df[["x75bp-200bp"]][1:3], ng20_df[["x75bp-200bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f2 <- paste0(round(f2$estimate, digits = 3), " ", "(", f2$magnitude, ")")
+f3 <- cohen.d(ng20_df[["x75bp-200bp"]][4:6], ng20_df[["x75bp-200bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f3 <- paste0(round(f3$estimate, digits = 3), " ", "(", f3$magnitude, ")")
+f4 <- cohen.d(ng20_df[["x200bp-500bp"]][1:3], ng20_df[["x200bp-500bp"]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f4 <- paste0(round(f4$estimate, digits = 3), " ", "(", f4$magnitude, ")")
+f5 <- cohen.d(ng20_df[["x200bp-500bp"]][1:3], ng20_df[["x200bp-500bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f5 <- paste0(round(f5$estimate, digits = 3), " ", "(", f5$magnitude, ")")
+f6 <- cohen.d(ng20_df[["x200bp-500bp"]][4:6], ng20_df[["x200bp-500bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f6 <- paste0(round(f6$estimate, digits = 3), " ", "(", f6$magnitude, ")")
+f7 <- cohen.d(ng20_df[["x500bp-1000bp"]][1:3], ng20_df[["x500bp-1000bp"]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f7 <- paste0(round(f7$estimate, digits = 3), " ", "(", f7$magnitude, ")")
+f8 <- cohen.d(ng20_df[["x500bp-1000bp"]][1:3], ng20_df[["x500bp-1000bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f8 <- paste0(round(f8$estimate, digits = 3), " ", "(", f8$magnitude, ")")
+f9 <- cohen.d(ng20_df[["x500bp-1000bp"]][4:6], ng20_df[["x500bp-1000bp"]][7:9], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+f9 <- paste0(round(f9$estimate, digits = 3), " ", "(", f9$magnitude, ")")
+
+t_results$effect_size <- c(f1, f2, f3, f4, f5, f6, f7, f8, f9)
+t_results$Levenes_Test <- round(c(leveneTest(`x75bp-200bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_18mer", "20ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x75bp-200bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_18mer", "20ng_mix"), ])$`Pr(>F)`[1], leveneTest(`x75bp-200bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_mix", "20ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x200bp-500bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_18mer", "20ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x200bp-500bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_18mer", "20ng_mix"), ])$`Pr(>F)`[1], leveneTest(`x200bp-500bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_mix", "20ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x500bp-1000bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_18mer", "20ng_6mer"), ])$`Pr(>F)`[1], leveneTest(`x500bp-1000bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_18mer", "20ng_mix"), ])$`Pr(>F)`[1], leveneTest(`x500bp-1000bp` ~ primer, data = ng20_df[ng20_df$primer %in% c("20ng_mix", "20ng_6mer"), ])$`Pr(>F)`[1]), digits = 3)
+ng20 <- t_results %>% dplyr::select(group1, group2, .y., Shapiro_Wilk1, Shapiro_Wilk2, Levenes_Test, method, p.adj, p.adj.signif, effect_size) %>% dplyr::rename(feature = .y.) %>% dplyr::rename(Hedges_g_effect_size = effect_size) 
+
+ng20_stats <- ng20
+ng20_stats$method <- ifelse(ng20$Shapiro_Wilk1 < 0.05 | ng20$Shapiro_Wilk2 < 0.05, "Mann–Whitney U test", "Student's t-test")
+```
+
+
+
+
+
+

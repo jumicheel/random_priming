@@ -20,6 +20,9 @@ The `vero_sars_7000000.RData` file contains all input data needed to run the cod
 library(DT) #create datatable
 library(tidyverse)
 library(UpSetR) #upset plot
+library(rstatix)
+library(car)
+library(effsize)
 
 data_filt <- agm_sars_genes_tpm %>% dplyr::filter(TPM >= 1)
 
@@ -183,4 +186,65 @@ upset23 <- upset(upset_count_2rep,
       sets.x.label = "Number of genes detected",
       mainbar.y.label = "Number of genes")
 upset23
+```
+
+
+```{r upset, message=FALSE, warning=FALSE}
+biotype_table <- biotype_filt %>% drop_na()
+biotype_table <- biotype_table %>% pivot_wider(names_from = gene_biotype, values_from = n, id_cols = sample)
+biotype_table$primer <-  as.factor(str_remove(biotype_table$sample, "\\d+$"))
+biotype_table$total <- genecount_sum$x
+
+length_count_wide <- length_count_lf %>% pivot_wider(names_from = bin, values_from = transcripts, id_cols = sample)
+biotype_table <- inner_join(biotype_table, length_count_wide, by=c("sample"="sample"))
+
+colnames(biotype_table)[8:11] <- c("x0_200bp", "x200_1000bp", "x1000_2500bp", "x2500_10000bp")
+
+biotype_table_filt <- biotype_table %>% dplyr::filter(primer %in% c("6mer", "18mer")) %>% droplevels()
+biotype_table_filt <- biotype_table_filt %>% dplyr::mutate(primer = fct_relevel(primer, "6mer"))
+
+t_results <- c()
+est <- c()
+mag <- c()
+s1 <- c()
+s2 <- c()
+l <- c()
+
+for (i in colnames(biotype_table_filt)[-c(1, 6)]){
+
+sh1 <- shapiro.test(x =biotype_table_filt[[i]][1:3])
+sh2 <- shapiro.test(x =biotype_table_filt[[i]][4:6])
+
+lev <- leveneTest(get(i) ~ primer, data = biotype_table_filt)
+
+f <- cohen.d(biotype_table_filt[[i]][1:3], biotype_table_filt[[i]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+
+est <- c(est, f$estimate)
+mag <- c(mag, as.character(f$magnitude))
+s1 <- c(s1, sh1$p.value)
+s2 <- c(s2, sh2$p.value)
+l <- c(l, lev$`Pr(>F)`[1])
+
+formula <- reformulate("primer", response = i)
+pwc <- biotype_table_filt %>% pairwise_t_test(formula, pool.sd = TRUE, p.adjust.method = "BH", paired = FALSE, detailed = TRUE)
+t_results <- rbind(t_results, pwc)
+}
+
+t_results$effect_size <- paste0(round(est, digits = 3), " ", "(", mag, ")")
+t_results$Shapiro_Wilk1 <- round(s1, digits = 3)
+t_results$Shapiro_Wilk2 <- round(s2, digits = 3)
+t_results$Levenes_Test <- round(l, digits = 3)
+
+clean_table <- t_results %>% dplyr::select(group1, group2, .y., Shapiro_Wilk1, Shapiro_Wilk2, Levenes_Test, method, p, p.signif, effect_size) %>% dplyr::rename(feature = .y.) %>% dplyr::rename(Hedges_g_effect_size = effect_size) 
+
+clean_table %>% dplyr::filter(Shapiro_Wilk1 < 0.05 | Shapiro_Wilk2 < 0.05) %>% dplyr::pull(feature)
+
+wilcox_pseudogene <- wilcox.test(x = biotype_table_filt$pseudogene[1:3], y=biotype_table_filt$pseudogene[4:6], alternative = "two.sided", paired = FALSE)
+
+clean_table$method <- ifelse(clean_table$Shapiro_Wilk1 < 0.05 | clean_table$Shapiro_Wilk2 < 0.05, "Mann–Whitney U test", "Student's t-test")
+clean_table <- clean_table %>% dplyr::mutate(p = if_else(feature == "pseudogene", wilcox_pseudogene$p.value, p))
+clean_table$p.signif <- ifelse(clean_table$p > 0.05, "ns", clean_table$p.signif)
+clean_table$p <- round(clean_table$p, digits = 5)
+
+DT::datatable(clean_table, caption = "Student's T test (two-sided ) for Vero/Sars experiment")
 ```

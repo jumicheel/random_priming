@@ -29,6 +29,9 @@ library(tidyverse)
 library(AnnotationHub) #gene and transcript info from ensembldb via annotationhub
 library(ensembldb)
 library(UpSetR) #upset plot
+library(rstatix)
+library(car)
+library(effsize)
 
 ## tst_JM_029_5000000_HBr_tpm is used as input; it includes gene id, gene length and TPM values (RSEM output)
 HBr_wf <- tst_JM_029_5000000_HBr_tpm 
@@ -251,12 +254,9 @@ hbr_read_gene_count_lf$reads <- factor(hbr_read_gene_count_lf$reads, levels= c("
 hbr_read_gene_count_lf$primer <- gsub(".{1}$","", hbr_read_gene_count_lf$sample)
 hbr_read_gene_count_lf$primer <- factor(hbr_read_gene_count_lf$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
 
-# function to get the s.e.m.
-std <- function(x) sd(x)/sqrt(length(x))
-
 mean_genes <- hbr_read_gene_count_lf %>% 
   group_by(primer, reads) %>% 
-  summarise(ave = mean(genes), sem = std(genes))
+  summarise(ave = mean(genes), sd = sd(genes))
 
 rvsg_labels <- c("156,250", "312,500", "625,000", "1,250,000", "2,500,000", "5,000,000", "10,000,000")
 
@@ -265,7 +265,7 @@ reads_vs_genes <- mean_genes %>%
   geom_line(aes(color = primer), alpha = 0.5, size = 1) +
   geom_point(aes(color = primer), alpha = 1) +
   scale_colour_manual( values = c("6mer" ="#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" = "#CCBB44")) +
-  geom_linerange(aes(ymin = ave-sem, ymax = ave+sem), alpha=0.5)+
+  geom_linerange(aes(ymin = ave-sd, ymax = ave+sd), alpha=0.5)+
   theme_classic() +
   labs(x = "Number of reads", y = "Number of genes detected (TPM >= 1)", color = "primer") +
   scale_x_discrete(labels= rvsg_labels) +
@@ -542,3 +542,74 @@ fpkm_exp1 <- hbr_fpkm_count_lf %>%
 fpkm_exp1
 ```
 
+```{r, message=FALSE, warning=FALSE, eval=FALSE}
+biotype_table_HBr$primer <-  as.factor(str_remove(biotype_table_HBr$sample, "\\d+$"))
+biotype_table_HBr$total <- genecount_sum$x
+
+hbr_fpkm_wide <- hbr_fpkm_count_lf %>% pivot_wider(names_from = bin, values_from = genes, id_cols = sample)
+hbr_gc_wide <- gc_bin_count_lf %>% pivot_wider(names_from = GC_content, values_from = genes, id_cols = sample)
+
+biotype_table_HBr <- inner_join(biotype_table_HBr, hbr_read_gene_count, by=c("sample"="sample"))
+biotype_table_HBr <- inner_join(biotype_table_HBr, hbr_fpkm_wide, by=c("sample"="sample"))
+biotype_table_HBr <- inner_join(biotype_table_HBr, hbr_gc_wide, by=c("sample"="sample"))
+
+colnames(biotype_table_HBr)[12:18] <- c("x156250", "x312500", "x625000", "x1250000", "x2500000", "x5mil", "x10mil" )
+colnames(biotype_table_HBr)[19:25] <- c("FPKM_1_20", "FPKM_20_50", "FPKM_50", "GC_20_40", "GC_40_50", "GC_50_60", "GC_60_80" )
+biotype_table_HBr$isoform <- isocount_sum$x
+
+colnames(hbr_length_count)[2:5] <- c("x0_200bp", "x200_1000bp", "x1000_2500bp", "x2500_10000bp")
+biotype_table_HBr <- cbind(biotype_table_HBr, hbr_length_count[, 2:5])
+
+biotype_table_HBr_filt <- biotype_table_HBr %>% dplyr::filter(primer %in% c("6mer", "18mer")) %>% dplyr::select(-c(`mitochondrial RNAs`, scRNA, other)) %>% droplevels()
+biotype_table_HBr_filt <- biotype_table_HBr_filt %>% dplyr::mutate(primer = fct_relevel(primer, "6mer"))
+
+t_results <- c()
+est <- c()
+mag <- c()
+s1 <- c()
+s2 <- c()
+l <- c()
+
+for (i in colnames(biotype_table_HBr_filt)[-c(1, 7)]){
+
+sh1 <- shapiro.test(x =biotype_table_HBr_filt[[i]][1:3])
+sh2 <- shapiro.test(x =biotype_table_HBr_filt[[i]][4:6])
+
+lev <- leveneTest(get(i) ~ primer, data = biotype_table_HBr_filt)
+
+f <- cohen.d(biotype_table_HBr_filt[[i]][1:3], biotype_table_HBr_filt[[i]][4:6], hedges.correction = TRUE, pooled = TRUE, paired = FALSE)
+est <- c(est, f$estimate)
+mag <- c(mag, as.character(f$magnitude))
+s1 <- c(s1, sh1$p.value)
+s2 <- c(s2, sh2$p.value)
+l <- c(l, lev$`Pr(>F)`[1])
+
+formula <- reformulate("primer", response = i)
+pwc <- biotype_table_HBr_filt %>% pairwise_t_test(formula, pool.sd = TRUE, p.adjust.method = "BH", paired = FALSE, detailed = TRUE)
+t_results <- rbind(t_results, pwc)
+}
+
+t_results$effect_size <- paste0(round(est, digits = 3), " ", "(", mag, ")")
+t_results$Shapiro_Wilk1 <- round(s1, digits = 3)
+t_results$Shapiro_Wilk2 <- round(s2, digits = 3)
+t_results$Levenes_Test <- round(l, digits = 3)
+
+clean_table <- t_results %>% dplyr::select(group1, group2, .y., Shapiro_Wilk1, Shapiro_Wilk2, Levenes_Test, method, p, p.signif, effect_size) %>% dplyr::rename(feature = .y.) %>% dplyr::rename(Hedges_g_effect_size = effect_size) 
+
+clean_table %>% dplyr::filter(Shapiro_Wilk1 < 0.05 | Shapiro_Wilk2 < 0.05) %>% dplyr::pull(feature)
+
+wilcox_snrna <- wilcox.test(x = biotype_table_HBr_filt$snRNA[1:3], y=biotype_table_HBr_filt$snRNA[4:6], alternative = "two.sided", paired = FALSE)
+wilcox_x312500 <- wilcox.test(x = biotype_table_HBr_filt$x312500[1:3], y=biotype_table_HBr_filt$x312500[4:6], alternative = "two.sided", paired = FALSE)
+wilcox_FPKM_20_50 <- wilcox.test(x = biotype_table_HBr_filt$FPKM_20_50[1:3], y=biotype_table_HBr_filt$FPKM_20_50[4:6], alternative = "two.sided", paired = FALSE)
+wilcox_GC_50_60 <- wilcox.test(x = biotype_table_HBr_filt$GC_50_60[1:3], y=biotype_table_HBr_filt$GC_50_60[4:6], alternative = "two.sided", paired = FALSE)
+
+clean_table$method <- ifelse(clean_table$Shapiro_Wilk1 < 0.05 | clean_table$Shapiro_Wilk2 < 0.05, "Mann–Whitney U test", "Student's t-test")
+clean_table <- clean_table %>% dplyr::mutate(p = if_else(feature == "snRNA", wilcox_snrna$p.value, p))
+clean_table <- clean_table %>% dplyr::mutate(p = if_else(feature == "x312500", wilcox_x312500$p.value, p))
+clean_table <- clean_table %>% dplyr::mutate(p = if_else(feature == "FPKM_20_50", wilcox_FPKM_20_50$p.value, p))
+clean_table <- clean_table %>% dplyr::mutate(p = if_else(feature == "GC_50_60", wilcox_GC_50_60$p.value, p))
+clean_table$p.signif <- ifelse(clean_table$p > 0.05, "ns", clean_table$p.signif)
+clean_table$p <- round(clean_table$p, digits = 5)
+
+DT::datatable(clean_table, caption = "Student's T test (two-sided ) for I experiment")
+```
