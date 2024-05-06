@@ -1,0 +1,128 @@
+---
+title: "Cell deconvolution results analysis/modelling"
+author: "Aram Safrastyan"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: TRUE
+    code_folding: hide
+    number_sections: TRUE
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message=F, warning=F}
+#BiocManager::install("TissueEnrich")
+library(TissueEnrich)              
+library(tidyverse)
+#library(AnnotationHub) 
+#library(ensembldb)
+library(ggpubr)
+#BiocManager::install("ComplexHeatmap")
+library(ComplexHeatmap)
+library(openxlsx)
+```
+
+Input data:
+1. df_HBr_029
+(generated from tst_JM_029_5000000_HBr_tpm from the original data provided for human brain total RNA experiment 1, modified as shown below)
+2. df_HBr_040 <- (generated from tst_JM_040_genes_30000000 from the original data provided for human brain total RNA experiment 2, modified as shown below) 
+
+
+```{r}
+#df_HBr_029 <- tst_JM_029_5000000_HBr_tpm 
+
+##the column gene_id is "copied" into "genes"
+#genes <-  df_HBr_029$gene_id
+##from the gene ids the part after the dot is removed // cropping the gene ids
+#genes1<-gsub("\\..*","",genes)
+
+##genes1 (the cropped version of the gene ids) is added to DFs (and called genes in there)
+#df_HBr_029$genes<-genes1
+
+##get gene and transcript info
+#human_ens <- query(AnnotationHub(), c("homo sapiens", "EnsDb"))
+#human_ens <- human_ens[["AH98047"]]
+#gen <- genes(human_ens, return.type = "data.frame")
+
+##HBr_wf and the gene_IDs_hsa are merged by genes/ensembl_gene_id 
+#df_HBr_029 <- df_HBr_029 %>% left_join(., gen, by = c("genes" = "gene_id"))
+
+## create a sample column based on the filename
+#df_HBr_029$sample <- gsub("_5000000_trim_clean.genes.results", "", df_HBr_029$filename)
+#df_HBr_029$sample <- gsub("no0..-0_tst_JM_029_", "", df_HBr_029$sample)
+#df_HBr_029$sample <- gsub("_HBr_", "", df_HBr_029$sample)
+
+##renaming all column names of the tables df_HBr
+#names(df_HBr_029) <- c("filename", "gene_id_version", "length", "tpm", "primer", "genes", "gene_name", "biotype", "gene_start", "gene_end", "seq_name", "seq_strand", "seq_coord_system", "description", "gene_id_version2", "canonical_transcript", "external_gene_name", "entrez_id", "sample")
+# 
+
+
+#save(df_HBr_029, df_HBr_040, file="C://Users/Julia/Desktop/Promotion/projects/random_priming/publication/random_priming_github/random_priming/random_priming/tissue_enrichment_input.RData")
+
+
+f <- c()
+for (i in c("6mer", "12mer", "18mer", "24mer")){
+  gene_list<- df_HBr_029 %>% dplyr::filter(tpm >= 1) %>% dplyr::filter(primer == i) %>%  pull("gene_name") %>% unique()
+  gs<-GeneSet(geneIds=gene_list,organism="Homo Sapiens", geneIdType=SymbolIdentifier())
+  gs_bckg<-GeneSet(geneIds=unique(df_HBr_029$gene_name),organism="Homo Sapiens", geneIdType=SymbolIdentifier())
+  output<-teEnrichment(inputGenes = gs, rnaSeqDataset = 1, tissueSpecificGeneType = 1, backgroundGenes = gs_bckg)
+  seEnrichmentOutput<-output[[1]]
+  enrichmentOutput<-setNames(data.frame(assay(seEnrichmentOutput),row.names = rowData(seEnrichmentOutput)[,1]), colData(seEnrichmentOutput)[,1])
+  enrichmentOutput$Tissue<-row.names(enrichmentOutput)
+  print(paste(i, "has", enrichmentOutput[enrichmentOutput$Tissue == "Cerebral Cortex", ]$Tissue.Specific.Genes, "cerebral cortex specific genes"))
+f <- c(f, enrichmentOutput[enrichmentOutput$Tissue == "Cerebral Cortex", ]$Tissue.Specific.Genes)
+dataset_name <- paste("result_029", i, sep = "_")
+assign(dataset_name, enrichmentOutput)
+}
+```
+
+```{r}
+#df_HBr_040 <- tst_JM_040_genes_30000000
+
+##the column gene_id is "copied" into "genes"
+#genes <-  df_HBr_040$gene_id
+##from the gene ids the part after the dot is removed // cropping the gene ids
+#genes1<-gsub("\\..*","",genes)
+
+##genes1 (the cropped version of the gene ids) is added to DFs (and called genes in there)
+#df_HBr_040$genes<-genes1
+
+##get gene and transcript info
+#human_ens <- query(AnnotationHub(), c("homo sapiens", "EnsDb"))
+#human_ens <- human_ens[["AH98047"]]
+#gen <- genes(human_ens, return.type = "data.frame")
+#trans <- transcripts(human_ens, return.type = "data.frame")
+
+
+##HBr_wf and the gene_IDs_hsa are merged by genes/ensembl_gene_id 
+#df_HBr_040 <- df_HBr_040 %>% left_join(., gen, by = c("genes" = "gene_id"))
+
+## create a sample column based on the filename
+#df_HBr_040$sample <- gsub("_30000000.genes.results", "", df_HBr_040$filename)
+#df_HBr_040$sample <- gsub("no0..-0_tst_JM_040_2_", "", df_HBr_040$sample)
+#df_HBr_040$sample <- gsub("_HBr_", "", df_HBr_040$sample)
+#df_HBr_040 <- df_HBr_040
+
+# 
+f <- c()
+for (i in c("6mer", "12mer", "18mer", "24mer")){
+  gene_list<- df_HBr_040 %>% dplyr::filter(TPM >= 1) %>% dplyr::filter(primer == i) %>%  pull("gene_name") %>% unique()
+  gs<-GeneSet(geneIds=gene_list,organism="Homo Sapiens", geneIdType=SymbolIdentifier())
+  gs_bckg<-GeneSet(geneIds=unique(df_HBr_040$gene_name),organism="Homo Sapiens", geneIdType=SymbolIdentifier())
+  output<-teEnrichment(inputGenes = gs, rnaSeqDataset = 1, tissueSpecificGeneType = 1, backgroundGenes = gs_bckg)
+  seEnrichmentOutput<-output[[1]]
+  enrichmentOutput<-setNames(data.frame(assay(seEnrichmentOutput),row.names = rowData(seEnrichmentOutput)[,1]), colData(seEnrichmentOutput)[,1])
+  enrichmentOutput$Tissue<-row.names(enrichmentOutput)
+  print(paste(i, "has", enrichmentOutput[enrichmentOutput$Tissue == "Cerebral Cortex", ]$Tissue.Specific.Genes, "cerebral cortex specific genes"))
+f <- c(f, enrichmentOutput[enrichmentOutput$Tissue == "Cerebral Cortex", ]$Tissue.Specific.Genes)
+dataset_name <- paste("result_040", i, sep = "_")
+assign(dataset_name, enrichmentOutput)
+}
+```
+
+```{r}
+annot_df <- data.frame(batch = c(rep("Experiment 1", 4), rep("Experiment 2", 4)))
+heatmap_df <- data.frame(tissue = rownames(result_029_6mer), primers = c("6mer1", "12mer1", "18mer1", "24mer1", "6mer2", "12mer2", "18mer2", "24mer2"), log10p = c(result_029_6mer$Log10PValue, result_029_12mer$Log10PValue, result_029_18mer$Log10PValue, result_029_24mer$Log10PValue, result_040_6mer$Log10PValue, result_040_12mer$Log10PValue, result_040_18mer$Log10PValue, result_040_24mer$Log10PValue)) %>% pivot_wider(names_from = primers, values_from = log10p) %>% column_to_rownames(var="tissue") %>% as.matrix()
+
+ht <- ComplexHeatmap::pheatmap(heatmap_df, cluster_rows = FALSE, cluster_cols = FALSE, gaps_col = 4, display_numbers = F, column_names_side = c("top"), border_color = "white", color=colorRampPalette(c("grey90", "darkgreen"))(n = 256), row_names_side = c("left"), angle_col = c("0"), labels_col = c("6mer", "12mer", "18mer", "24mer", "6mer", "12mer", "18mer", "24mer"), heatmap_legend_param = list(title = expression(bold(-log["10"]~"adjusted" ~ bolditalic(P)))), fontfamily = "Helvetica")
+```

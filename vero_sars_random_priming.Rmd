@@ -23,6 +23,7 @@ library(UpSetR) #upset plot
 library(rstatix)
 library(car)
 library(effsize)
+library(ggsignif)
 
 data_filt <- agm_sars_genes_tpm %>% dplyr::filter(TPM >= 1)
 
@@ -85,12 +86,21 @@ total_genes <- genecount_sum %>%
   scale_color_manual("primer", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
   scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + 
   scale_y_continuous(trans = "log10" ) +
+  geom_signif(comparisons = list(c("6mer", "18mer")),
+              test = "t.test", test.args = list(var.equal = T),
+              map_signif_level = TRUE, tip_length = 0.02, aes(x = primer, y = x), vjust = 0.1, inherit.aes = FALSE) +
   labs(x="", y="Number of genes detected (TPM >= 1)") +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, vjust=0.7), legend.position = "none") +
   guides(fill = "none")
   
 total_genes
+total_genes_stat <- ggplot_build(total_genes)
+#annotations based on the results of the geom_signif function and the results shown in the summarizing table of statistical tests in the last code chunk of this markdown file
+total_genes_stat$data[[3]]$annotation <- c(rep("n.s.",3))
+## Reconstruct plot
+total_genes_stat <- ggplot_gtable(total_genes_stat)
+plot(total_genes_stat)
 ```
 
 
@@ -110,6 +120,15 @@ biotype_filt$primer <- gsub(".{1}$","", biotype_filt$primer)
 biotype_filt$primer <- factor(biotype_filt$primer, levels= c("6mer", "12mer", "18mer", "24mer"))
 biotype_filt$gene_biotype <- factor(biotype_filt$gene_biotype, levels= c("protein_coding", "pseudogene", "snoRNA", "snRNA"))
 
+#annotations based on the results of the geom_signif function and the results shown in the summarizing table of statistical tests in the last code chunk of this markdown file
+annotation_df <- data.frame(
+  gene_biotype = c("protein_coding", "pseudogene", "snoRNA", "snRNA"),
+  start = c("6mer", "6mer", "6mer", "6mer"),
+  end = c("18mer", "18mer","18mer", "18mer"),
+  y = c(8600, 75, 32, 13.5),
+  label = c("n.s.", "n.s.", "n.s.", "*")
+)
+
 biotype_counts <- biotype_filt %>% 
   dplyr::filter(gene_biotype %in% c("snoRNA", "snRNA", "pseudogene","protein_coding" )) %>%
   ggplot(., aes(x = reorder(primer, primer), y = n, fill = primer,  alpha = primer, color = primer)) + 
@@ -117,7 +136,13 @@ biotype_counts <- biotype_filt %>%
   geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
   scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
   scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
-  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) +facet_wrap(.~ case_when(gene_biotype == "pseudogene" ~ "pseudogene", gene_biotype == "snRNA" ~ "snRNA", gene_biotype == "snoRNA" ~ "snoRNA", gene_biotype == "protein_coding" ~ "protein coding"), scales = "free_y") +
+  scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + geom_signif(inherit.aes = FALSE,
+    data = annotation_df, tip_length = 0.02,
+    aes(xmin = start, xmax = end, annotations = label, y_position = y),
+    vjust = 0.1,
+    manual = TRUE
+  ) + 
+  facet_wrap(.~ case_when(gene_biotype == "pseudogene" ~ "pseudogene", gene_biotype == "snRNA" ~ "snRNA", gene_biotype == "snoRNA" ~ "snoRNA", gene_biotype == "protein_coding" ~ "protein coding"), scales = "free_y") +
   labs(title="", x="", y="Number of genes (TPM >= 1)") + 
   theme_classic() +
   theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7))
@@ -154,11 +179,21 @@ length_plot <- length_count_lf %>%
   scale_fill_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
   scale_color_manual("legend", values = c("6mer" = "#4477AA", "12mer" = "#228833", "18mer" = "#AA3377", "24mer" ="#CCBB44")) +
   scale_alpha_manual(values = c(0.4,0.4,0.4,0.4)) + 
+  geom_signif(comparisons = list(c("6mer", "18mer")),
+              test = "t.test", test.args = list(var.equal = T),
+              map_signif_level = TRUE, tip_length = 0.02, aes(x = primer, y = transcripts), vjust = 0.1, inherit.aes = FALSE) +
   facet_wrap(.~ bin, scales = "free_y") + scale_y_continuous(trans = "log10" ) + 
   labs(title="", x="", y="Number of transcripts (TPM >= 1)") + 
   theme_classic() +
   theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7))
 length_plot
+
+length_plot_stat <- ggplot_build(length_plot)
+#annotations based on the results of the geom_signif function and the results shown in the summarizing table of statistical tests in the last code chunk of this markdown file
+length_plot_stat$data[[3]]$annotation <- c(rep("n.s.",3),rep("n.s.",3),rep("n.s.",3), rep("n.s.",3))
+## Reconstruct plot
+length_plot_stat <- ggplot_gtable(length_plot_stat)
+plot(length_plot_stat)
 ```
 
 
@@ -248,3 +283,4 @@ clean_table$p <- round(clean_table$p, digits = 5)
 
 DT::datatable(clean_table, caption = "Student's T test (two-sided ) for Vero/Sars experiment")
 ```
+

@@ -24,6 +24,7 @@ library(ggh4x)
 library(rstatix)
 library(car)
 library(effsize)
+library(ggsignif)
 ```
 
 
@@ -85,7 +86,7 @@ dat5ng$length_bins <- factor(dat5ng$length_bins, levels=c("75bp-200bp", "200bp-5
   theme(strip.background = element_blank(), strip.text.x = element_blank(), axis.text.x = element_text(angle = 90))
  
  plot_5ng
-
+ 
 ########################################################################
 ############# 20 ng Input Amount
 
@@ -136,7 +137,6 @@ dat20ng$length_bins <- factor(dat20ng$length_bins, levels=c("75bp-200bp", "200bp
   theme(strip.background = element_blank(), strip.text.x = element_blank(), axis.text.x = element_text(angle = 90))
  
   plot_20ng
-
 ```
 Box plots of the mean FU (scaled) per technical replicate per fragment length bin
 
@@ -166,13 +166,24 @@ ng5_box <- ng5_bin_y_scaled %>%
   geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
   scale_fill_manual("legend", values = c("5ng_6mer" = "#4477AA", "5ng_18mer" = "#AA3377", "5ng_mix" = "black")) +
   scale_color_manual("legend", values = c("5ng_6mer" = "#4477AA", "5ng_18mer" = "#AA3377", "5ng_mix" = "black")) +
-  scale_alpha_manual(values = c(0.4,0.4,0.4)) + facet_wrap(.~ length_bins, scales = "free_y") +
+  scale_alpha_manual(values = c(0.4,0.4,0.4)) + 
+  geom_signif(comparisons = list(c("5ng_6mer", "5ng_18mer"), c("5ng_6mer", "5ng_mix"), c("5ng_18mer", "5ng_mix")),
+              test = "t.test", test.args = list(var.equal = T),
+              map_signif_level = TRUE, tip_length = 0.02, aes(x = sample.name, y = bin_sum), vjust = 0.1, inherit.aes = FALSE, step_increase = 0.1) +
+  facet_wrap(.~ length_bins, scales = "free_y") +
   #scale_y_continuous(trans = "log10" ) + 
   labs(title="", x="", y="mean FU (scaled)") +
   theme_classic() +
   theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7)) +
   scale_x_discrete(labels = primers)
-ng5_box
+#ng5_box
+
+ng5_box_stat <- ggplot_build(ng5_box)
+#annotations based on the results of the geom_signif function and the results shown in the summarizing table of statistical tests in the last code chunk of this markdown file
+ng5_box_stat$data[[3]]$annotation <- c(rep("n.s.",3),rep("n.s.",3),rep("n.s.",3), rep("n.s.",3), rep("n.s.",3), rep("n.s.",3), rep("**",3), rep("*",3), rep("n.s.",3))
+## Reconstruct plot
+ng5_box_stat <- ggplot_gtable(ng5_box_stat)
+plot(ng5_box_stat)
 
 
 #########
@@ -196,13 +207,24 @@ ng20_box <- ng20_bin_y_scaled %>%
   geom_dotplot(binaxis='y', stackdir='center', dotsize=1, alpha=1, color = "black") +
   scale_fill_manual("legend", values = c("20ng_6mer" = "#4477AA", "20ng_18mer" = "#AA3377", "20ng_mix" = "black")) +
   scale_color_manual("legend", values = c("20ng_6mer" = "#4477AA", "20ng_18mer" = "#AA3377", "20ng_mix" = "black")) +
-  scale_alpha_manual(values = c(0.4,0.4,0.4)) + facet_wrap(.~ length_bins, scales = "free_y") +
+  scale_alpha_manual(values = c(0.4,0.4,0.4)) + 
+  geom_signif(comparisons = list(c("20ng_6mer", "20ng_18mer"), c("20ng_6mer", "20ng_mix"), c("20ng_18mer", "20ng_mix")),
+              test = "t.test", test.args = list(var.equal = T),
+              map_signif_level = TRUE, tip_length = 0.02, aes(x = sample.name, y = bin_sum), vjust = 0.1, inherit.aes = FALSE, step_increase = 0.1) +
+  facet_wrap(.~ length_bins, scales = "free_y") +
   #scale_y_continuous(trans = "log10" ) + 
   labs(title="", x="", y="mean FU (scaled)") +
   theme_classic() +
   theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=0.7)) +
   scale_x_discrete(labels = primers)
-ng20_box
+#ng20_box
+
+ng20_box_stat <- ggplot_build(ng20_box)
+#annotations based on the results of the geom_signif function and the results shown in the summarizing table of statistical tests in the last code chunk of this markdown file
+ng20_box_stat$data[[3]]$annotation <- c(rep("n.s.",3),rep("n.s.",3),rep("n.s.",3), rep("n.s.",3), rep("*",3), rep("n.s.",3), rep("n.s.",3), rep("n.s.",3), rep("n.s.",3))
+## Reconstruct plot
+ng20_box_new <- ggplot_gtable(ng20_box_stat)
+plot(ng20_box_new)
 ```
 
 
@@ -307,9 +329,3 @@ ng20 <- t_results %>% dplyr::select(group1, group2, .y., Shapiro_Wilk1, Shapiro_
 ng20_stats <- ng20
 ng20_stats$method <- ifelse(ng20$Shapiro_Wilk1 < 0.05 | ng20$Shapiro_Wilk2 < 0.05, "Mann–Whitney U test", "Student's t-test")
 ```
-
-
-
-
-
-
