@@ -10,7 +10,7 @@ Markdown containing the custom code for the analysis of the second human brain R
 Markdown containing the custom code for the tissue enrichment analysis of the first and second human brain RNA experiment (shown in Supplementary Figures 2), necessary data is provided in tissue_enrichment_input.RData.
 
 **functional_annotation.Rmd:**
-Markdown containing the custom code for the functional annotation analysis of the first and second human brain RNA experiment (shown in Supplementary Table 3 and Supplementary Data 2-5 and 7-10), necessary data is provided in unique_genes_functional_annotation.rdata.
+Markdown containing the custom code for the functional annotation analysis of the first and second human brain RNA experiment (shown in Supplementary Table 3 and Supplementary Data 3-6 and 8-11), necessary data is provided in unique_genes_functional_annotation.rdata.
 
 **vero_sars_random_priming.Rmd:**
 Markdown containing the custom code for the analysis of the Vero cell RNA experiment (shown in Supplementary Figures 5 and 6), necessary data is provided in vero_sars_7000000.RData.
